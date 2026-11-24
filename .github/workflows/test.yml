@@ -1,9 +1,16 @@
 name: PS5 test (eenmalig)
 
-# Handmatige test: één controle + testmelding + healthchecks-ping.
-# Staat los van de doorlopende controle en stoort die niet.
+# Handmatige test, los van de doorlopende controle (stoort die niet).
+#  - standaard: één controle + testmelding + healthchecks-ping
+#  - alarmtest: stuurt healthchecks.io een nep-fout ("down"); de doorlopende controle
+#    pingt binnen ±30 s weer "ok", dus daarna volgt vanzelf "up".
 on:
   workflow_dispatch:
+    inputs:
+      alarmtest:
+        description: "Test het healthchecks-alarm (down + up)"
+        type: boolean
+        default: false
 
 concurrency:
   group: ps5-test
@@ -16,15 +23,24 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC || vars.NTFY_TOPIC }}
+      HC_PING_URL: ${{ secrets.HC_PING_URL || vars.HC_PING_URL }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Eén controle met testmelding
+        if: ${{ !inputs.alarmtest }}
         env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC || vars.NTFY_TOPIC }}
-          HC_PING_URL: ${{ secrets.HC_PING_URL || vars.HC_PING_URL }}
           ROUNDS: "1"
           TEST_NOTIFY: "true"
         run: |
           [ -n "$NTFY_TOPIC" ] && echo "NTFY_TOPIC: ingesteld" || echo "NTFY_TOPIC: ONTBREEKT"
           [ -n "$HC_PING_URL" ] && echo "HC_PING_URL: ingesteld" || echo "HC_PING_URL: ONTBREEKT"
           python3 monitor.py
+
+      - name: Alarmtest healthchecks.io (nep-fout sturen)
+        if: ${{ inputs.alarmtest }}
+        run: |
+          [ -n "$HC_PING_URL" ] || { echo "HC_PING_URL ontbreekt"; exit 1; }
+          curl -fsS -m 15 --retry 3 "${HC_PING_URL%/}/fail" && echo " -> /fail verstuurd"
