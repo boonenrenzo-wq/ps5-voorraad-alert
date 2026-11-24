@@ -12,6 +12,8 @@ Controleert om de paar minuten, 24/7, of deze producten op de PlayStation Direct
 - `monitor.py` leest op de productpagina de status van de koopknop (`activeCtaId`).
   `UNAVAILABLE` = uitverkocht; elke andere status = melding met link om meteen te bestellen.
 - Opent PlayStation een wachtrij, dan krijg je daar ook een melding van.
+- Reservekanaal: bij voorraad of wachtrij 'mislukt' de run bewust, zodat GitHub je ook mailt
+  (handig als ntfy.sh die dag geen berichten meer aanneemt van het gedeelde GitHub-IP-adres).
 - Elke dag rond 10u een stille melding "monitor draait nog".
 - Kan de checker de pagina niet lezen (blokkade of gewijzigde site), dan krijg je hooguit om de
   3 uur een waarschuwing.

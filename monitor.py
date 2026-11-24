@@ -152,6 +152,12 @@ def notify(title: str, message: str, priority: int = 3, tags: list[str] | None =
             with urllib.request.urlopen(req, timeout=15) as resp:
                 log(f"  melding verstuurd (HTTP {resp.status}): {title}")
                 return
+        except urllib.error.HTTPError as e:
+            log(f"  melding mislukt (HTTP {e.code}), poging {poging + 1}/3")
+            if e.code == 429:  # dagquotum van dit IP-adres op ntfy.sh; opnieuw proberen helpt niet
+                print("::warning title=ntfy quotum::ntfy.sh weigerde de melding (429)", flush=True)
+                return
+            time.sleep(3)
         except Exception as e:  # netwerkfout: kort wachten en opnieuw
             log(f"  melding mislukt ({e}), poging {poging + 1}/3")
             time.sleep(3)
@@ -170,12 +176,17 @@ def main() -> int:
                priority=4, tags=["white_check_mark"], click=PRODUCTS[0]["url"])
 
     laatste: dict[str, tuple[str, str]] = {}
+    alarm = False
     for ronde in range(1, rounds + 1):
         log(f"Controle {ronde}/{rounds}")
         for p in PRODUCTS:
             st, detail = check(p)
             laatste[p["naam"]] = (st, detail)
             log(f"  {p['naam']}: {st} ({detail})")
+            if st in (BESCHIKBAAR, WACHTRIJ):
+                alarm = True
+                # Zichtbaar in de run-samenvatting en in de mail die GitHub stuurt bij een 'mislukte' run.
+                print(f"::error title=PS5 {st}::{p['naam']} -> {p['url']}", flush=True)
             if st == BESCHIKBAAR:
                 notify(f"🚨 OP VOORRAAD: {p['naam']}",
                        f"{p['prijs']} op playstation.com. Tik NU om te bestellen (aanmelden nodig, max. 1 per bestelling).",
@@ -200,7 +211,9 @@ def main() -> int:
         samenvatting = "\n".join(f"• {n}: {st.lower()}" for n, (st, _) in laatste.items())
         notify("✅ PS5-monitor draait nog", samenvatting, priority=2, tags=["eyes"])
 
-    return 0
+    # Reservekanaal: bij voorraad laten we de run bewust 'mislukken'. GitHub mailt dan
+    # (en pusht via de GitHub-app), ook als ntfy die dag geen berichten meer aanneemt.
+    return 1 if alarm else 0
 
 
 if __name__ == "__main__":
