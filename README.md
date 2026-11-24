@@ -19,10 +19,15 @@ Controleert om de paar minuten, 24/7, of deze producten op de PlayStation Direct
 - Elke dag rond 10u een stille melding "monitor draait nog".
 - Is de pagina 5 minuten onleesbaar (blokkade of gewijzigde site), dan een waarschuwing
   (hooguit om de 3 uur) en een melding zodra het weer werkt.
+- **Dodemansknop (healthchecks.io):** de checker pingt elke 30 s zolang hij alles kan lezen, en
+  pingt `/fail` als een melding niet doorkomt. Blijven de pings 10 min weg (checker gestopt of
+  pagina onleesbaar) of komt er een `/fail`, dan meldt healthchecks.io dat zelf via ntfy en mail.
 - Stopt vanzelf na `EINDDATUM` in de workflow (31-12-2026).
 
 ## Instellingen
 - Repo-secret `NTFY_TOPIC` = het onderwerp waarop je in de ntfy-app geabonneerd bent.
+- Repo-secret `HC_PING_URL` = ping-URL van de check op healthchecks.io (period 1 min, grace 10 min,
+  met ntfy-integratie op hetzelfde onderwerp).
 - Testmelding: Actions → *PS5 voorraad-check* → *Run workflow*.
 - Stoppen (bv. na je bestelling): Actions → *PS5 voorraad-check* → ⋯ → *Disable workflow*
   (een lopende run annuleren alleen is niet genoeg: die herstart zichzelf).

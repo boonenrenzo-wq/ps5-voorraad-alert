@@ -19,6 +19,7 @@ Omgevingsvariabelen:
   INTERVAL     seconden tussen controles (standaard 30)
   EINDDATUM    JJJJ-MM-DD; daarna stopt de monitor vanzelf
   TEST_NOTIFY  "true" -> stuur een testmelding (om de app te controleren)
+  HC_PING_URL  ping-URL van healthchecks.io (dodemansknop; optioneel)
 """
 from __future__ import annotations
 
@@ -158,16 +159,32 @@ def notify(title: str, message: str, priority: int = 3, tags: list[str] | None =
             log(f"  melding mislukt (HTTP {e.code}), poging {poging + 1}/3")
             if e.code == 429:  # dagquotum van dit IP-adres op ntfy.sh; opnieuw proberen helpt niet
                 print("::warning title=ntfy quotum::ntfy.sh weigerde de melding (429)", flush=True)
-                return False
+                break
             time.sleep(3)
         except Exception as e:  # netwerkfout: kort wachten en opnieuw
             log(f"  melding mislukt ({e}), poging {poging + 1}/3")
             time.sleep(3)
+    ping("/fail")  # healthchecks.io laat je dan via een ander pad weten dat meldingen niet doorkomen
     return False
 
 
 def env_true(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+
+
+def ping(suffix: str = "") -> None:
+    """Dodemansknop: meldt aan healthchecks.io dat de checker leeft ('' ) of dat iets misging ('/fail').
+    Blijven de pings 10 min weg, dan stuurt healthchecks.io zelf een melding (ntfy + mail)."""
+    url = os.environ.get("HC_PING_URL", "").strip()
+    if not url:
+        return
+    try:
+        with urllib.request.urlopen(url.rstrip("/") + suffix, timeout=10) as resp:
+            if suffix or not getattr(ping, "_ok", False):
+                log(f"  healthchecks-ping{suffix or ''} ok (HTTP {resp.status})")
+            ping._ok = True
+    except Exception as e:  # een gemiste ping is niet erg; de volgende komt 30 s later
+        log(f"  healthchecks-ping{suffix} mislukt ({e})")
 
 
 HERHAAL_ALARM_S = 180        # zolang iets bestelbaar is: melding herhalen om de 3 min
@@ -246,6 +263,11 @@ def main() -> int:
                 onbekend_sinds.setdefault(naam, nu)
 
         st_vorig.update(huidig)
+
+        # Alleen 'ik leef' melden als alles leesbaar was: blijft de pagina onleesbaar of stopt de
+        # checker, dan vallen de pings weg en waarschuwt healthchecks.io je na de grace-tijd.
+        if ONBEKEND not in huidig.values():
+            ping()
 
         # Blind: pagina al even onleesbaar -> waarschuwen (beperkt), en melden als het hersteld is.
         nu = time.monotonic()

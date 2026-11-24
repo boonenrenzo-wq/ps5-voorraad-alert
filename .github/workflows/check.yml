@@ -32,6 +32,7 @@ jobs:
         id: check
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC || vars.NTFY_TOPIC }}
+          HC_PING_URL: ${{ secrets.HC_PING_URL || vars.HC_PING_URL }}
           LOOP_SECONDS: "20400"   # 5u40
           INTERVAL: "30"
           EINDDATUM: "2026-12-31" # daarna stopt de monitor vanzelf
