@@ -99,6 +99,9 @@ def fetch_urllib(url: str) -> tuple[int, str, str]:
             return resp.status, resp.geturl(), body.decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, url, ""
+    except Exception as e:  # time-out, verbinding verbroken, ... mag de lus nooit laten crashen
+        log(f"  netwerkfout bij ophalen: {type(e).__name__}: {e}")
+        return 0, url, ""
 
 
 def fetch_chrome(url: str) -> tuple[int, str, str]:
@@ -138,11 +141,14 @@ def parse(html: str, final_url: str, product_id: str) -> tuple[str, str]:
 def check(product: dict) -> tuple[str, str]:
     url = product["url"]
     status, final_url, html = fetch_urllib(url)
-    result = parse(html, final_url, product["product_id"]) if html else (ONBEKEND, f"HTTP {status}")
+    result = parse(html, final_url, product["product_id"]) if html else (ONBEKEND, f"HTTP {status or 'geen antwoord'}")
     if result[0] == ONBEKEND:
-        log(f"  gewone HTTP gaf {result[1]} -> probeer headless Chrome")
+        eerste = result[1]
+        log(f"  gewone HTTP gaf {eerste} -> probeer headless Chrome")
         status, final_url, html = fetch_chrome(url)
         result = parse(html, final_url, product["product_id"]) if html else (ONBEKEND, "Chrome gaf geen pagina")
+        if result[0] == ONBEKEND:
+            result = (ONBEKEND, f"{eerste}; Chrome: {result[1]}")
     return result
 
 
@@ -227,7 +233,8 @@ def main() -> int:
     st_vorig: dict[str, str] = {}
     laatste_alarm: dict[str, float] = {}
     onbekend_sinds: dict[str, float] = {}
-    laatste_blind = 0.0
+    laatste_detail: dict[str, str] = {}
+    laatste_blind = -1e9  # niet 0: monotonic() begint bij de opstarttijd van de VM
     blind_gemeld = False
     heartbeat_dag = ""
 
@@ -240,7 +247,11 @@ def main() -> int:
         huidig: dict[str, str] = {}
         for p in PRODUCTS:
             naam = p["naam"]
-            st, detail = check(p)
+            try:
+                st, detail = check(p)
+            except Exception as e:  # vangnet: één fout mag de doorlopende controle nooit stoppen
+                st, detail = ONBEKEND, f"fout: {type(e).__name__}: {e}"
+            laatste_detail[naam] = detail
             huidig[naam] = st
             vorig = st_vorig.get(naam)
             if st != vorig or ronde == 1:
@@ -285,10 +296,16 @@ def main() -> int:
         nu = time.monotonic()
         blind = [n for n, t in onbekend_sinds.items() if nu - t >= BLIND_NA_S]
         if blind and nu - laatste_blind >= BLIND_HERHAAL_S:
+            serverfout = any(re.search(r"HTTP 5\d\d", laatste_detail.get(n, "")) for n in blind)
+            uitleg = ("playstation.com geeft serverfouten (overbelast of onderhoud). Dat kan ook "
+                      "drukte door een nieuwe voorraad zijn: kijk zelf even op de site."
+                      if serverfout else
+                      "Mogelijk blokkeert playstation.com de checker of is de pagina veranderd. "
+                      "Vraag Claude om te kijken.")
             notify("⚠️ PS5-monitor ziet de pagina niet",
-                   "Kon de status niet lezen voor: " + ", ".join(blind) +
-                   ". Mogelijk blokkeert playstation.com de checker of is de pagina veranderd. "
-                   "Vraag Claude om te kijken.", priority=3, tags=["warning"])
+                   "Kon de status niet lezen voor: " + ", ".join(blind) + ". " + uitleg,
+                   priority=4 if serverfout else 3, tags=["warning"],
+                   click=PRODUCTS[0]["url"] if serverfout else None)
             laatste_blind = nu
             blind_gemeld = True
         elif not onbekend_sinds and blind_gemeld:
