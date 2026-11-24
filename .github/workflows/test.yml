@@ -1,0 +1,30 @@
+name: PS5 test (eenmalig)
+
+# Handmatige test: één controle + testmelding + healthchecks-ping.
+# Staat los van de doorlopende controle en stoort die niet.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ps5-test
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Eén controle met testmelding
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC || vars.NTFY_TOPIC }}
+          HC_PING_URL: ${{ secrets.HC_PING_URL || vars.HC_PING_URL }}
+          ROUNDS: "1"
+          TEST_NOTIFY: "true"
+        run: |
+          [ -n "$NTFY_TOPIC" ] && echo "NTFY_TOPIC: ingesteld" || echo "NTFY_TOPIC: ONTBREEKT"
+          [ -n "$HC_PING_URL" ] && echo "HC_PING_URL: ingesteld" || echo "HC_PING_URL: ONTBREEKT"
+          python3 monitor.py
