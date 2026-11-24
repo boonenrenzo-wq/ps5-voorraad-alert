@@ -27,7 +27,7 @@ jobs:
 
       - name: Controleer voorraad op playstation.com
         env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC || vars.NTFY_TOPIC }}
           ROUNDS: "2"
           INTERVAL: "120"
           HEARTBEAT: ${{ github.event.schedule == '7 9 * * *' }}
