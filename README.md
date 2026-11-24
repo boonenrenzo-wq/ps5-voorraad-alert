@@ -5,6 +5,7 @@ Controleert om de paar minuten, 24/7, of deze producten op de PlayStation Direct
 
 - PS5 Digitale Editie 825 GB (€599,99)
 - PS5 Digitale Editie 825 GB + 2 DualSense-controllers (€649,99)
+- PS5 Console 1 TB met disc (€649,99)
 
 ## Hoe het werkt
 - `.github/workflows/check.yml` draait doorlopend op GitHub Actions (gratis voor openbare repo's):

@@ -48,6 +48,12 @@ PRODUCTS = [
         "url": "https://www.playstation.com/nl-be/ps5/digital-edition-825-gb/product/digital-edition-825-gb-two-dualsense-bundle/",
         "product_id": "PSD001-PSDE01916_79-PS5DIGITAL2TALIE",
     },
+    {
+        "naam": "PS5 Console 1 TB (met disc)",
+        "prijs": "€649,99",
+        "url": "https://www.playstation.com/nl-be/ps5/1-tb-disc/",
+        "product_id": "PSD001-PSDE01929_59-PS5CONSOLEHB2OYE",
+    },
 ]
 
 UA = (
