@@ -54,6 +54,12 @@ PRODUCTS = [
         "url": "https://www.playstation.com/nl-be/ps5/1-tb-disc/",
         "product_id": "PSD001-PSDE01929_59-PS5CONSOLEHB2OYE",
     },
+    {
+        "naam": "PS5 Console 1 TB (met disc) + 2 DualSense",
+        "prijs": "€699,99",
+        "url": "https://www.playstation.com/nl-be/ps5/1-tb-disc/product/two-dualsense-wireless-controllers-bundle/",
+        "product_id": "PSD001-PSDE01929_59-PS5CONSOLETAPQ3E",
+    },
 ]
 
 UA = (
