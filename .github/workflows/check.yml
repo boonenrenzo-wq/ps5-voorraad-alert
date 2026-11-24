@@ -1,9 +1,10 @@
 name: PS5 voorraad-check
 
+# Doorlopende controle: één run kijkt elke 30 seconden, ±5u40 lang, en start daarna
+# zichzelf opnieuw. De cron hieronder is alleen een vangnet voor als die keten ooit breekt.
 on:
   schedule:
-    - cron: "*/5 * * * *"   # elke 5 minuten (GitHub kan soms een paar minuten later starten)
-    - cron: "7 9 * * *"     # dagelijks ±10u Belgische tijd: 'monitor draait nog'-melding
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       test:
@@ -11,25 +12,34 @@ on:
         type: boolean
         default: true
 
+# Er draait er altijd maar één tegelijk; nieuwe starts wachten in de rij (max. 1).
 concurrency:
   group: ps5-check
   cancel-in-progress: false
 
 permissions:
   contents: read
+  actions: write   # nodig om de volgende run te starten
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
 
-      - name: Controleer voorraad op playstation.com
+      - name: Controleer voorraad op playstation.com (doorlopend)
+        id: check
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC || vars.NTFY_TOPIC }}
-          ROUNDS: "2"
-          INTERVAL: "120"
-          HEARTBEAT: ${{ github.event.schedule == '7 9 * * *' }}
+          LOOP_SECONDS: "20400"   # 5u40
+          INTERVAL: "30"
+          EINDDATUM: "2026-12-31" # daarna stopt de monitor vanzelf
           TEST_NOTIFY: ${{ github.event_name == 'workflow_dispatch' && inputs.test }}
         run: python3 monitor.py
+
+      - name: Volgende run starten
+        if: always() && steps.check.outputs.stop != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run check.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}" -f test=false

@@ -7,21 +7,25 @@ Controleert om de paar minuten, 24/7, of deze producten op de PlayStation Direct
 - PS5 Digitale Editie 825 GB + 2 DualSense-controllers (€649,99)
 
 ## Hoe het werkt
-- `.github/workflows/check.yml` start elke 5 minuten op GitHub Actions (gratis voor openbare repo's)
-  en controleert twee keer per run (om de ±2 minuten).
+- `.github/workflows/check.yml` draait doorlopend op GitHub Actions (gratis voor openbare repo's):
+  één run controleert **elke 30 seconden**, ±5u40 lang, en start daarna zelf de volgende run.
+  Een cron om de 15 minuten is het vangnet als die keten ooit breekt.
 - `monitor.py` leest op de productpagina de status van de koopknop (`activeCtaId`).
   `UNAVAILABLE` = uitverkocht; elke andere status = melding met link om meteen te bestellen.
+  Zolang het bestelbaar blijft: melding om de 3 minuten; daarna "weer uitverkocht".
 - Opent PlayStation een wachtrij, dan krijg je daar ook een melding van.
-- Reservekanaal: bij voorraad of wachtrij 'mislukt' de run bewust, zodat GitHub je ook mailt
-  (handig als ntfy.sh die dag geen berichten meer aanneemt van het gedeelde GitHub-IP-adres).
+- Neemt ntfy een voorraadmelding niet aan, dan 'mislukt' de run bewust: GitHub mailt je
+  dan meteen, en de volgende run start direct.
 - Elke dag rond 10u een stille melding "monitor draait nog".
-- Kan de checker de pagina niet lezen (blokkade of gewijzigde site), dan krijg je hooguit om de
-  3 uur een waarschuwing.
+- Is de pagina 5 minuten onleesbaar (blokkade of gewijzigde site), dan een waarschuwing
+  (hooguit om de 3 uur) en een melding zodra het weer werkt.
+- Stopt vanzelf na `EINDDATUM` in de workflow (31-12-2026).
 
 ## Instellingen
 - Repo-secret `NTFY_TOPIC` = het onderwerp waarop je in de ntfy-app geabonneerd bent.
 - Testmelding: Actions → *PS5 voorraad-check* → *Run workflow*.
-- Stoppen (bv. na je bestelling): Actions → *PS5 voorraad-check* → ⋯ → *Disable workflow*.
+- Stoppen (bv. na je bestelling): Actions → *PS5 voorraad-check* → ⋯ → *Disable workflow*
+  (een lopende run annuleren alleen is niet genoeg: die herstart zichzelf).
 - Producten toevoegen: lijst `PRODUCTS` bovenaan in `monitor.py`.
 
 Alleen de Python-standaardbibliotheek; er wordt niets geïnstalleerd.

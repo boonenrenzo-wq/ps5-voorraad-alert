@@ -14,9 +14,10 @@ Hoe de status wordt bepaald:
 
 Omgevingsvariabelen:
   NTFY_TOPIC   onderwerp in de ntfy-app (verplicht om meldingen te sturen)
-  ROUNDS       aantal controles per run (standaard 2)
-  INTERVAL     seconden tussen controles binnen één run (standaard 120)
-  HEARTBEAT    "true" -> stuur een korte 'monitor draait nog'-melding
+  LOOP_SECONDS doorlopend controleren gedurende zoveel seconden (GitHub-modus; 0 = uit)
+  ROUNDS       aantal controles als LOOP_SECONDS 0 is (lokaal testen, standaard 1)
+  INTERVAL     seconden tussen controles (standaard 30)
+  EINDDATUM    JJJJ-MM-DD; daarna stopt de monitor vanzelf
   TEST_NOTIFY  "true" -> stuur een testmelding (om de app te controleren)
 """
 from __future__ import annotations
@@ -133,11 +134,12 @@ def check(product: dict) -> tuple[str, str]:
 
 
 def notify(title: str, message: str, priority: int = 3, tags: list[str] | None = None,
-           click: str | None = None) -> None:
+           click: str | None = None) -> bool:
+    """Stuurt een pushmelding via ntfy. Geeft True als ntfy de melding aannam."""
     topic = os.environ.get("NTFY_TOPIC", "").strip()
     if not topic:
         log("  (geen NTFY_TOPIC ingesteld; melding niet verstuurd)")
-        return
+        return False
     payload = {"topic": topic, "title": title, "message": message, "priority": priority,
                "tags": tags or []}
     if click:
@@ -151,69 +153,126 @@ def notify(title: str, message: str, priority: int = 3, tags: list[str] | None =
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 log(f"  melding verstuurd (HTTP {resp.status}): {title}")
-                return
+                return True
         except urllib.error.HTTPError as e:
             log(f"  melding mislukt (HTTP {e.code}), poging {poging + 1}/3")
             if e.code == 429:  # dagquotum van dit IP-adres op ntfy.sh; opnieuw proberen helpt niet
                 print("::warning title=ntfy quotum::ntfy.sh weigerde de melding (429)", flush=True)
-                return
+                return False
             time.sleep(3)
         except Exception as e:  # netwerkfout: kort wachten en opnieuw
             log(f"  melding mislukt ({e}), poging {poging + 1}/3")
             time.sleep(3)
+    return False
 
 
 def env_true(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
 
 
+HERHAAL_ALARM_S = 180        # zolang iets bestelbaar is: melding herhalen om de 3 min
+BLIND_NA_S = 300             # pas waarschuwen als de pagina 5 min onleesbaar blijft
+BLIND_HERHAAL_S = 3 * 3600   # blind-waarschuwing hooguit om de 3 uur
+
+
 def main() -> int:
-    rounds = max(1, int(os.environ.get("ROUNDS", "2")))
-    interval = max(10, int(os.environ.get("INTERVAL", "120")))
+    """Controleert in een lus. LOOP_SECONDS>0: doorlopend tot die tijd om is (GitHub-modus).
+    Anders: ROUNDS controles (handig om lokaal te testen)."""
+    loop_s = int(os.environ.get("LOOP_SECONDS", "0"))
+    rounds = max(1, int(os.environ.get("ROUNDS", "1")))
+    interval = max(10, int(os.environ.get("INTERVAL", "30")))
+
+    einddatum = os.environ.get("EINDDATUM", "").strip()
+    if einddatum and datetime.now(timezone.utc).date().isoformat() > einddatum:
+        log(f"Einddatum {einddatum} voorbij: monitor gestopt.")
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:
+            with open(out, "a") as f:
+                f.write("stop=true\n")
+        return 0
 
     if env_true("TEST_NOTIFY"):
         notify("Testmelding PS5-monitor", "Werkt! Zo ziet een melding eruit. Tik om de PS5-pagina te openen.",
                priority=4, tags=["white_check_mark"], click=PRODUCTS[0]["url"])
 
-    laatste: dict[str, tuple[str, str]] = {}
-    alarm = False
-    for ronde in range(1, rounds + 1):
-        log(f"Controle {ronde}/{rounds}")
+    st_vorig: dict[str, str] = {}
+    laatste_alarm: dict[str, float] = {}
+    onbekend_sinds: dict[str, float] = {}
+    laatste_blind = 0.0
+    blind_gemeld = False
+    heartbeat_dag = ""
+
+    begin = time.monotonic()
+    ronde = 0
+    while True:
+        ronde += 1
+        t0 = time.monotonic()
+        log(f"Controle {ronde}")
+        huidig: dict[str, str] = {}
         for p in PRODUCTS:
+            naam = p["naam"]
             st, detail = check(p)
-            laatste[p["naam"]] = (st, detail)
-            log(f"  {p['naam']}: {st} ({detail})")
+            huidig[naam] = st
+            vorig = st_vorig.get(naam)
+            if st != vorig or ronde == 1:
+                log(f"  {naam}: {st} ({detail})")
+            nu = time.monotonic()
+
             if st in (BESCHIKBAAR, WACHTRIJ):
-                alarm = True
-                # Zichtbaar in de run-samenvatting en in de mail die GitHub stuurt bij een 'mislukte' run.
-                print(f"::error title=PS5 {st}::{p['naam']} -> {p['url']}", flush=True)
-            if st == BESCHIKBAAR:
-                notify(f"🚨 OP VOORRAAD: {p['naam']}",
-                       f"{p['prijs']} op playstation.com. Tik NU om te bestellen (aanmelden nodig, max. 1 per bestelling).",
-                       priority=5, tags=["rotating_light"], click=p["url"])
-            elif st == WACHTRIJ:
-                notify(f"⏳ Wachtrij open: {p['naam']}",
-                       "PlayStation Direct heeft een wachtrij geopend; de verkoop start waarschijnlijk. Tik om in de rij te gaan.",
-                       priority=5, tags=["hourglass"], click=p["url"])
-        if ronde < rounds:
-            time.sleep(interval)
+                onbekend_sinds.pop(naam, None)
+                if vorig != st or nu - laatste_alarm.get(naam, -1e9) >= HERHAAL_ALARM_S:
+                    print(f"::error title=PS5 {st}::{naam} -> {p['url']}", flush=True)
+                    if st == BESCHIKBAAR:
+                        ok = notify(f"🚨 OP VOORRAAD: {naam}",
+                                    f"{p['prijs']} op playstation.com. Tik NU om te bestellen "
+                                    "(aanmelden nodig, max. 1 per bestelling).",
+                                    priority=5, tags=["rotating_light"], click=p["url"])
+                    else:
+                        ok = notify(f"⏳ Wachtrij open: {naam}",
+                                    "PlayStation Direct heeft een wachtrij geopend; de verkoop start "
+                                    "waarschijnlijk. Tik om in de rij te gaan.",
+                                    priority=5, tags=["hourglass"], click=p["url"])
+                    laatste_alarm[naam] = nu
+                    if not ok:
+                        # Reservekanaal: run laten mislukken -> GitHub mailt meteen; de herstartstap
+                        # in de workflow start daarna direct een nieuwe controle.
+                        print("::error title=Melding mislukt::ntfy nam de voorraadmelding niet aan", flush=True)
+                        return 1
+            elif st == UITVERKOCHT:
+                onbekend_sinds.pop(naam, None)
+                if vorig in (BESCHIKBAAR, WACHTRIJ):
+                    notify(f"Weer uitverkocht: {naam}", "Ik blijf verder kijken.", priority=3, tags=["x"])
+            else:  # ONBEKEND
+                onbekend_sinds.setdefault(naam, nu)
 
-    nu = datetime.now(timezone.utc)
-    blind = [n for n, (st, _) in laatste.items() if st == ONBEKEND]
-    # Waarschuwing als de monitor 'blind' is, hooguit één keer per ~3 uur (zonder opgeslagen status).
-    if blind and nu.hour % 3 == 0 and nu.minute < 10:
-        notify("⚠️ PS5-monitor ziet de pagina niet",
-               "Kon de status niet lezen voor: " + ", ".join(blind) +
-               ". Mogelijk blokkeert playstation.com de checker of is de pagina veranderd. Vraag Claude om te kijken.",
-               priority=3, tags=["warning"])
+        st_vorig.update(huidig)
 
-    if env_true("HEARTBEAT"):
-        samenvatting = "\n".join(f"• {n}: {st.lower()}" for n, (st, _) in laatste.items())
-        notify("✅ PS5-monitor draait nog", samenvatting, priority=2, tags=["eyes"])
+        # Blind: pagina al even onleesbaar -> waarschuwen (beperkt), en melden als het hersteld is.
+        nu = time.monotonic()
+        blind = [n for n, t in onbekend_sinds.items() if nu - t >= BLIND_NA_S]
+        if blind and nu - laatste_blind >= BLIND_HERHAAL_S:
+            notify("⚠️ PS5-monitor ziet de pagina niet",
+                   "Kon de status niet lezen voor: " + ", ".join(blind) +
+                   ". Mogelijk blokkeert playstation.com de checker of is de pagina veranderd. "
+                   "Vraag Claude om te kijken.", priority=3, tags=["warning"])
+            laatste_blind = nu
+            blind_gemeld = True
+        elif not onbekend_sinds and blind_gemeld:
+            notify("PS5-monitor ziet de pagina weer", "Alles werkt opnieuw.", priority=2, tags=["white_check_mark"])
+            blind_gemeld = False
 
-    # Reservekanaal: bij voorraad laten we de run bewust 'mislukken'. GitHub mailt dan
-    # (en pusht via de GitHub-app), ook als ntfy die dag geen berichten meer aanneemt.
-    return 1 if alarm else 0
+        # Dagelijks rond 10u Belgische tijd (9u UTC in de winter): 'monitor draait nog'.
+        utc = datetime.now(timezone.utc)
+        if loop_s and utc.hour == 9 and utc.minute < 2 and heartbeat_dag != utc.date().isoformat():
+            notify("✅ PS5-monitor draait nog",
+                   "\n".join(f"• {n}: {s.lower()}" for n, s in huidig.items()), priority=2, tags=["eyes"])
+            heartbeat_dag = utc.date().isoformat()
+
+        klaar = (time.monotonic() - begin + interval > loop_s) if loop_s else (ronde >= rounds)
+        if klaar:
+            log(f"Klaar na {ronde} controles.")
+            return 0
+        time.sleep(max(0.0, interval - (time.monotonic() - t0)))
 
 
 if __name__ == "__main__":
