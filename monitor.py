@@ -20,6 +20,8 @@ Omgevingsvariabelen:
   EINDDATUM    JJJJ-MM-DD; daarna stopt de monitor vanzelf
   TEST_NOTIFY  "true" -> stuur een testmelding (om de app te controleren)
   HC_PING_URL  ping-URL van healthchecks.io (dodemansknop; optioneel)
+  ONTDEK_ELKE  om de hoeveel rondes naar nieuwe producten zoeken (standaard 10 = ±5 min)
+  BEKEND_PAD   pad van bekende_producten.json (standaard naast dit script)
 """
 from __future__ import annotations
 
@@ -61,6 +63,41 @@ PRODUCTS = [
         "product_id": "PSD001-PSDE01929_59-PS5CONSOLETAPQ3E",
     },
 ]
+
+# Tweede lijn: andere PS5-bundels. Per ronde wordt er één gecontroleerd (om beurten), dus elk
+# ongeveer om de 2,5 min. Nieuw ontdekte bundels komen hier tijdens de run automatisch bij.
+EXTRA = [
+    {"naam": "PS5 Digitale Editie + EA SPORTS FC 26", "prijs": "€499,99",
+     "url": "https://www.playstation.com/nl-be/ps5/digital-edition-825-gb/product/ea-sports-fc-26-bundle/",
+     "product_id": "PSD001-PSDE01916_79-PS5DIGITALNKV6OE"},
+    {"naam": "PS5 Digitale Editie + Fortnite Flowering Chaos", "prijs": "€349,99",
+     "url": "https://www.playstation.com/nl-be/ps5/digital-edition-825-gb/product/fortnite-flowering-chaos-bundle/",
+     "product_id": "PSD001-PSDE01916_79-PS5DIGITALKBNIIE"},
+    {"naam": "PS5 Digitale Editie Wolverine Limited Edition", "prijs": "€649,99",
+     "url": "https://www.playstation.com/nl-be/ps5/digital-edition-825-gb/product/marvels-wolverine-battle-yellow-limited-edition-bundle/",
+     "product_id": "PSD001-PSDE01916_79-PS5DIGITALSLOSSE"},
+    {"naam": "PS5 Console 1 TB + EA SPORTS FC 26", "prijs": "€549,99",
+     "url": "https://www.playstation.com/nl-be/ps5/1-tb-disc/product/ea-sports-fc-26-bundle/",
+     "product_id": "PSD001-PSDE01929_59-PS5CONSOLEKOMN4E"},
+    {"naam": "PS5 Console 1 TB + Fortnite Flowering Chaos", "prijs": "€549,99",
+     "url": "https://www.playstation.com/nl-be/ps5/1-tb-disc/product/fortnite-flowering-chaos-bundle/",
+     "product_id": "PSD001-PSDE01929_59-PS5CONSOLETBMPGE"},
+]
+
+# Nieuwe producten ontdekken (bv. een GTA-bundel): de PS5-shoplijst (nieuwste eerst) en de
+# pagina's met varianten van de Digitale Editie en de 1 TB-console. Bekende producten staan in
+# bekende_producten.json; wat daar niet in staat, is nieuw -> melding (één keer).
+SHOP_ALL = "https://www.playstation.com/nl-be/consoles/ps5/shop-all/"
+VARIANT_PAGINAS = [
+    "https://www.playstation.com/nl-be/ps5/digital-edition-825-gb/",
+    "https://www.playstation.com/nl-be/ps5/1-tb-disc/",
+]
+BEKEND_PAD = os.environ.get(
+    "BEKEND_PAD", os.path.join(os.path.dirname(os.path.abspath(__file__)), "bekende_producten.json"))
+GRID_RE = re.compile(r'\{\\?"__typename\\?":\\?"Product\\?",\\?"id\\?":\\?"(PSD001-[^"\\]+)\\?",'
+                     r'\\?"name\\?":\\?"([^"\\]+)')
+PRIJS_RE = re.compile(r'\\?"(?:basePrice|displayPrice)\\?":\\?"(€[^"\\]+)')
+VARIANT_RE = re.compile(r'/nl-be/ps5/[a-z0-9\-]+/product/[a-z0-9\-]+/')
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -205,6 +242,83 @@ def ping(suffix: str = "") -> None:
         log(f"  healthchecks-ping{suffix} mislukt ({e})")
 
 
+def laad_bekend() -> dict:
+    try:
+        with open(BEKEND_PAD, encoding="utf-8") as f:
+            b = json.load(f)
+        b.setdefault("producten", {})
+        b.setdefault("varianten", [])
+        return b
+    except (OSError, ValueError):
+        return {"producten": {}, "varianten": []}
+
+
+def bewaar_bekend(b: dict) -> None:
+    b["varianten"] = sorted(set(b["varianten"]))
+    with open(BEKEND_PAD, "w", encoding="utf-8") as f:
+        json.dump(b, f, ensure_ascii=False, indent=2, sort_keys=True)
+        f.write("\n")
+
+
+def lees_shoplijst(html: str) -> list[tuple[str, str, str]]:
+    """(product_id, naam, prijs) uit de PS5-shoplijst, in volgorde (nieuwste eerst)."""
+    uit, gezien = [], set()
+    for mm in GRID_RE.finditer(html):
+        pid, naam = mm.group(1), mm.group(2).replace("\\t", "").strip()
+        if pid in gezien:
+            continue
+        gezien.add(pid)
+        pm = PRIJS_RE.search(html, mm.end(), mm.end() + 600)
+        uit.append((pid, naam, pm.group(1) if pm else "?"))
+    return uit
+
+
+def variant_info(url: str) -> dict:
+    """Haalt een (nieuwe) productpagina op: naam, prijs, product-id en voorraadstatus."""
+    st_http, final_url, html = fetch_urllib(url)
+    slug = url.rstrip("/").rsplit("/", 1)[-1].replace("-", " ")
+    info = {"naam": f"PS5 {slug}", "prijs": "?", "url": url, "product_id": ""}
+    if not html:
+        info["status"] = ONBEKEND
+        return info
+    ctas = CTA_RE.findall(html)
+    if ctas:
+        info["product_id"] = ctas[0].split(":")[-1].rsplit("-", 1)[0]
+        pid = re.escape(info["product_id"])
+        nm = re.search(pid + r'\\?",\\?"__typename\\?":\\?"Product\\?"[^{}]*?\\?"name\\?":\\?"([^"\\]+)', html)
+        if nm:
+            info["naam"] = nm.group(1).replace("\\t", "").strip()
+        pr = re.search(pid + r'-[A-Z0-9]+\\?",\\?"displayPrice\\?":\\?"([^"\\]+)', html)
+        if pr:
+            info["prijs"] = pr.group(1)
+    info["status"] = parse(html, final_url, info["product_id"])[0]
+    return info
+
+
+def ontdek(bekend: dict, bewaakt: set[str], eerste_keer: bool) -> tuple[list[dict], list[dict]]:
+    """Zoekt nieuwe PS5-producten. Geeft (nieuwe_varianten met info, nieuwe_shopproducten)."""
+    nieuwe_var: list[dict] = []
+    for pagina in VARIANT_PAGINAS:
+        _, _, html = fetch_urllib(pagina)
+        for pad in sorted(set(VARIANT_RE.findall(html))):
+            url = "https://www.playstation.com" + pad
+            if url in bekend["varianten"]:
+                continue
+            bekend["varianten"].append(url)
+            if not eerste_keer and url not in bewaakt:
+                nieuwe_var.append(variant_info(url))
+    _, _, html = fetch_urllib(SHOP_ALL)
+    var_ids = {v["product_id"] for v in nieuwe_var}
+    nieuwe_shop: list[dict] = []
+    for pid, naam, prijs in lees_shoplijst(html):
+        if pid in bekend["producten"]:
+            continue
+        bekend["producten"][pid] = naam
+        if not eerste_keer and pid not in var_ids:
+            nieuwe_shop.append({"product_id": pid, "naam": naam, "prijs": prijs})
+    return nieuwe_var, nieuwe_shop
+
+
 HERHAAL_ALARM_S = 180        # zolang iets bestelbaar is: melding herhalen om de 3 min
 BLIND_NA_S = 300             # pas waarschuwen als de pagina 5 min onleesbaar blijft
 BLIND_HERHAAL_S = 3 * 3600   # blind-waarschuwing hooguit om de 3 uur
@@ -238,6 +352,11 @@ def main() -> int:
     blind_gemeld = False
     heartbeat_dag = ""
 
+    extras = [dict(p) for p in EXTRA]
+    bekend = laad_bekend()
+    eerste_keer = not bekend["producten"]  # geen lijst -> eerst stil vullen, niets melden
+    ontdek_elke = max(1, int(os.environ.get("ONTDEK_ELKE", "10")))  # om de 10 rondes = ±5 min
+
     begin = time.monotonic()
     ronde = 0
     while True:
@@ -245,7 +364,10 @@ def main() -> int:
         t0 = time.monotonic()
         log(f"Controle {ronde}")
         huidig: dict[str, str] = {}
-        for p in PRODUCTS:
+        te_checken = list(PRODUCTS)
+        if extras:
+            te_checken.append(extras[(ronde - 1) % len(extras)])
+        for p in te_checken:
             naam = p["naam"]
             try:
                 st, detail = check(p)
@@ -287,6 +409,36 @@ def main() -> int:
 
         st_vorig.update(huidig)
 
+        # Nieuwe PS5-producten of -bundels zoeken (om de ±5 min).
+        if (ronde - 1) % ontdek_elke == 0:
+            try:
+                bewaakt = {x["url"] for x in PRODUCTS + extras}
+                nieuwe_var, nieuwe_shop = ontdek(bekend, bewaakt, eerste_keer)
+                for v in nieuwe_var:
+                    log(f"  NIEUWE BUNDEL: {v['naam']} ({v['prijs']}) {v['status']} {v['url']}")
+                    extras.append({k: v[k] for k in ("naam", "prijs", "url", "product_id")})
+                    if v["status"] == BESCHIKBAAR:
+                        notify(f"🚨 NIEUW & OP VOORRAAD: {v['naam']}",
+                               f"{v['prijs']} op playstation.com. Tik NU om te bestellen.",
+                               priority=5, tags=["rotating_light"], click=v["url"])
+                        laatste_alarm[v["naam"]] = time.monotonic()
+                        st_vorig[v["naam"]] = BESCHIKBAAR
+                    else:
+                        notify(f"🆕 Nieuwe PS5-bundel: {v['naam']}",
+                               f"{v['prijs']} · nu: {v['status'].lower()}. Ik bewaak hem vanaf nu ook "
+                               "en meld het zodra hij bestelbaar is.",
+                               priority=4, tags=["new"], click=v["url"])
+                for n in nieuwe_shop:
+                    log(f"  NIEUW PRODUCT IN SHOP: {n['naam']} ({n['prijs']}) {n['product_id']}")
+                    notify(f"🆕 Nieuw bij PlayStation: {n['naam']}",
+                           f"{n['prijs']} · verscheen net in de PS5-shop. Tik om te kijken.",
+                           priority=4, tags=["new"], click=SHOP_ALL)
+                if eerste_keer or nieuwe_var or nieuwe_shop:
+                    bewaar_bekend(bekend)
+                    eerste_keer = False
+            except Exception as e:  # ontdekken is extra; mag de hoofdcontrole nooit storen
+                log(f"  ontdekken mislukt: {type(e).__name__}: {e}")
+
         # Alleen 'ik leef' melden als alles leesbaar was: blijft de pagina onleesbaar of stopt de
         # checker, dan vallen de pings weg en waarschuwt healthchecks.io je na de grace-tijd.
         if ONBEKEND not in huidig.values():
@@ -315,8 +467,11 @@ def main() -> int:
         # Dagelijks rond 10u Belgische tijd (9u UTC in de winter): 'monitor draait nog'.
         utc = datetime.now(timezone.utc)
         if loop_s and utc.hour == 9 and utc.minute < 2 and heartbeat_dag != utc.date().isoformat():
+            hoofd = [p["naam"] for p in PRODUCTS]
             notify("✅ PS5-monitor draait nog",
-                   "\n".join(f"• {n}: {s.lower()}" for n, s in huidig.items()), priority=2, tags=["eyes"])
+                   "\n".join(f"• {n}: {st_vorig.get(n, '?').lower()}" for n in hoofd) +
+                   f"\n+ {len(extras)} andere bundels en nieuwe producten in het oog",
+                   priority=2, tags=["eyes"])
             heartbeat_dag = utc.date().isoformat()
 
         klaar = (time.monotonic() - begin + interval > loop_s) if loop_s else (ronde >= rounds)

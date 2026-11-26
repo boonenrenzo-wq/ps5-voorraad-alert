@@ -8,6 +8,14 @@ Controleert om de paar minuten, 24/7, of deze producten op de PlayStation Direct
 - PS5 Console 1 TB met disc (€649,99)
 - PS5 Console 1 TB met disc + 2 DualSense-controllers (€699,99)
 
+Tweede lijn (om beurten, elk ±om de 2,5 min): de andere PS5-bundels in de shop
+(EA SPORTS FC 26, Fortnite Flowering Chaos, Wolverine Limited Edition).
+
+**Nieuwe producten:** om de ±5 min kijkt de monitor of er een nieuwe PS5-bundel of een nieuw
+PS5-product in de shop verschijnt (bv. een GTA-bundel). Nieuw = niet in `bekende_producten.json`.
+Je krijgt dan één melding; een nieuwe bundel wordt vanaf dan ook op voorraad bewaakt, en de lijst
+wordt automatisch bijgewerkt in de repo.
+
 ## Hoe het werkt
 - `.github/workflows/check.yml` draait doorlopend op GitHub Actions (gratis voor openbare repo's):
   één run controleert **elke 30 seconden**, ±5u40 lang, en start daarna zelf de volgende run.
