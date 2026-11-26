@@ -64,24 +64,11 @@ PRODUCTS = [
     },
 ]
 
-# Tweede lijn: andere PS5-bundels. Per ronde wordt er één gecontroleerd (om beurten), dus elk
-# ongeveer om de 2,5 min. Nieuw ontdekte bundels komen hier tijdens de run automatisch bij.
-EXTRA = [
-    {"naam": "PS5 Digitale Editie + EA SPORTS FC 26", "prijs": "€499,99",
-     "url": "https://www.playstation.com/nl-be/ps5/digital-edition-825-gb/product/ea-sports-fc-26-bundle/",
-     "product_id": "PSD001-PSDE01916_79-PS5DIGITALNKV6OE"},
-    {"naam": "PS5 Digitale Editie + Fortnite Flowering Chaos", "prijs": "€349,99",
-     "url": "https://www.playstation.com/nl-be/ps5/digital-edition-825-gb/product/fortnite-flowering-chaos-bundle/",
-     "product_id": "PSD001-PSDE01916_79-PS5DIGITALKBNIIE"},
-    {"naam": "PS5 Digitale Editie Wolverine Limited Edition", "prijs": "€649,99",
-     "url": "https://www.playstation.com/nl-be/ps5/digital-edition-825-gb/product/marvels-wolverine-battle-yellow-limited-edition-bundle/",
-     "product_id": "PSD001-PSDE01916_79-PS5DIGITALSLOSSE"},
-    {"naam": "PS5 Console 1 TB + EA SPORTS FC 26", "prijs": "€549,99",
-     "url": "https://www.playstation.com/nl-be/ps5/1-tb-disc/product/ea-sports-fc-26-bundle/",
-     "product_id": "PSD001-PSDE01929_59-PS5CONSOLEKOMN4E"},
-    {"naam": "PS5 Console 1 TB + Fortnite Flowering Chaos", "prijs": "€549,99",
-     "url": "https://www.playstation.com/nl-be/ps5/1-tb-disc/product/fortnite-flowering-chaos-bundle/",
-     "product_id": "PSD001-PSDE01929_59-PS5CONSOLETBMPGE"},
+# Tweede lijn: extra bundels, per ronde één (om beurten).
+EXTRA: list[dict] = [
+    # Bewust leeg: de bestaande EA SPORTS FC 26-, Fortnite- en Wolverine-bundels hoeven niet
+    # (oud, komen volgens Renzo niet meer terug). Ze staan wel in bekende_producten.json, dus
+    # geen 'nieuw'-melding. Nieuw ontdekte bundels komen hier tijdens de run automatisch bij.
 ]
 
 # Nieuwe producten ontdekken (bv. een GTA-bundel): de PS5-shoplijst (nieuwste eerst) en de
@@ -470,7 +457,8 @@ def main() -> int:
             hoofd = [p["naam"] for p in PRODUCTS]
             notify("✅ PS5-monitor draait nog",
                    "\n".join(f"• {n}: {st_vorig.get(n, '?').lower()}" for n in hoofd) +
-                   f"\n+ {len(extras)} andere bundels en nieuwe producten in het oog",
+                   (f"\n+ {len(extras)} nieuw ontdekte bundel(s)" if extras else "") +
+                   "\n+ nieuwe PS5-producten in het oog",
                    priority=2, tags=["eyes"])
             heartbeat_dag = utc.date().isoformat()
 

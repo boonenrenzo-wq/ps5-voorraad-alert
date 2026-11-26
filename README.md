@@ -8,8 +8,8 @@ Controleert om de paar minuten, 24/7, of deze producten op de PlayStation Direct
 - PS5 Console 1 TB met disc (€649,99)
 - PS5 Console 1 TB met disc + 2 DualSense-controllers (€699,99)
 
-Tweede lijn (om beurten, elk ±om de 2,5 min): de andere PS5-bundels in de shop
-(EA SPORTS FC 26, Fortnite Flowering Chaos, Wolverine Limited Edition).
+De bestaande EA SPORTS FC 26-, Fortnite- en Wolverine-bundels worden niet bewaakt (oud).
+Nieuw ontdekte bundels worden wel automatisch mee bewaakt (om beurten, één per ronde).
 
 **Nieuwe producten:** om de ±5 min kijkt de monitor of er een nieuwe PS5-bundel of een nieuw
 PS5-product in de shop verschijnt (bv. een GTA-bundel). Nieuw = niet in `bekende_producten.json`.
