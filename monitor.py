@@ -308,7 +308,7 @@ def ontdek(bekend: dict, bewaakt: set[str], eerste_keer: bool) -> tuple[list[dic
 
 HERHAAL_ALARM_S = 180        # zolang iets bestelbaar is: melding herhalen om de 3 min
 BLIND_NA_S = 300             # pas waarschuwen als de pagina 5 min onleesbaar blijft
-BLIND_HERHAAL_S = 3 * 3600   # blind-waarschuwing hooguit om de 3 uur
+BLIND_HERHAAL_S = 30 * 60    # zolang de checker blind is: waarschuwing om de 30 min
 
 
 def main() -> int:
@@ -436,15 +436,19 @@ def main() -> int:
         blind = [n for n, t in onbekend_sinds.items() if nu - t >= BLIND_NA_S]
         if blind and nu - laatste_blind >= BLIND_HERHAAL_S:
             serverfout = any(re.search(r"HTTP 5\d\d", laatste_detail.get(n, "")) for n in blind)
-            uitleg = ("playstation.com geeft serverfouten (overbelast of onderhoud). Dat kan ook "
-                      "drukte door een nieuwe voorraad zijn: kijk zelf even op de site."
-                      if serverfout else
-                      "Mogelijk blokkeert playstation.com de checker of is de pagina veranderd. "
-                      "Vraag Claude om te kijken.")
+            geblokkeerd = any("HTTP 403" in laatste_detail.get(n, "") for n in blind)
+            if serverfout:
+                uitleg = ("playstation.com geeft serverfouten (overbelast of onderhoud). Dat kan ook "
+                          "drukte door een nieuwe voorraad zijn: kijk zelf even op de site.")
+            elif geblokkeerd:
+                uitleg = ("playstation.com weigert de computer van de checker (HTTP 403). Jij kunt gewoon "
+                          "bestellen; kijk zelf even op de site.")
+            else:
+                uitleg = "Mogelijk is de pagina veranderd. Kijk zelf even op de site en vraag Claude om te kijken."
             notify("⚠️ PS5-monitor ziet de pagina niet",
-                   "Kon de status niet lezen voor: " + ", ".join(blind) + ". " + uitleg,
-                   priority=4 if serverfout else 3, tags=["warning"],
-                   click=PRODUCTS[0]["url"] if serverfout else None)
+                   "Kon de status niet lezen voor: " + ", ".join(blind) + ". " + uitleg +
+                   " Deze melding komt om de 30 min terug zolang het duurt.",
+                   priority=4, tags=["warning"], click=PRODUCTS[0]["url"])
             laatste_blind = nu
             blind_gemeld = True
         elif not onbekend_sinds and blind_gemeld:
