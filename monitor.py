@@ -307,7 +307,8 @@ def ontdek(bekend: dict, bewaakt: set[str], eerste_keer: bool) -> tuple[list[dic
 
 
 HERHAAL_ALARM_S = 180        # zolang iets bestelbaar is: melding herhalen om de 3 min
-BLIND_NA_S = 300             # pas waarschuwen als de pagina 5 min onleesbaar blijft
+BLIND_NA_S = 300             # pas waarschuwen als de pagina 5 min onleesbaar blijft (korte storingen negeren)
+BLOK_NA_S = 90               # bij HTTP 403 (blokkade, blijft meestal duren) al na 1,5 min waarschuwen
 BLIND_HERHAAL_S = 30 * 60    # zolang de checker blind is: waarschuwing om de 30 min
 
 
@@ -433,7 +434,8 @@ def main() -> int:
 
         # Blind: pagina al even onleesbaar -> waarschuwen (beperkt), en melden als het hersteld is.
         nu = time.monotonic()
-        blind = [n for n, t in onbekend_sinds.items() if nu - t >= BLIND_NA_S]
+        blind = [n for n, t in onbekend_sinds.items()
+                 if nu - t >= (BLOK_NA_S if "HTTP 403" in laatste_detail.get(n, "") else BLIND_NA_S)]
         if blind and nu - laatste_blind >= BLIND_HERHAAL_S:
             serverfout = any(re.search(r"HTTP 5\d\d", laatste_detail.get(n, "")) for n in blind)
             geblokkeerd = any("HTTP 403" in laatste_detail.get(n, "") for n in blind)

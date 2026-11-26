@@ -27,8 +27,8 @@ wordt automatisch bijgewerkt in de repo.
 - Neemt ntfy een voorraadmelding niet aan, dan 'mislukt' de run bewust: GitHub mailt je
   dan meteen, en de volgende run start direct.
 - Elke dag rond 10u een stille melding "monitor draait nog".
-- Is de pagina 5 minuten onleesbaar (blokkade of gewijzigde site), dan een waarschuwing
-  (hooguit om de 3 uur) en een melding zodra het weer werkt.
+- Blokkade (HTTP 403): waarschuwing na 1,5 min. Andere storing of gewijzigde site: na 5 min
+  (herhaald om de 30 min zolang het duurt) en een melding zodra het weer werkt.
 - **Dodemansknop (healthchecks.io):** de checker pingt elke 30 s zolang hij alles kan lezen, en
   pingt `/fail` als een melding niet doorkomt. Blijven de pings 10 min weg (checker gestopt of
   pagina onleesbaar) of komt er een `/fail`, dan meldt healthchecks.io dat zelf via ntfy en mail.
