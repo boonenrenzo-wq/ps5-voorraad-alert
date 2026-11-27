@@ -22,7 +22,7 @@ wordt automatisch bijgewerkt in de repo.
   Een cron om de 15 minuten is het vangnet als die keten ooit breekt.
 - `monitor.py` leest op de productpagina de status van de koopknop (`activeCtaId`).
   `UNAVAILABLE` = uitverkocht; elke andere status = melding met link om meteen te bestellen.
-  Zolang het bestelbaar blijft: melding om de 3 minuten; daarna "weer uitverkocht".
+  Bij voorraad: 3 meldingen kort na elkaar (om de 5 s), daarna om de 3 min zolang het duurt; dan "weer uitverkocht".
 - Opent PlayStation een wachtrij, dan krijg je daar ook een melding van.
 - Neemt ntfy een voorraadmelding niet aan, dan 'mislukt' de run bewust: GitHub mailt je
   dan meteen, en de volgende run start direct.
