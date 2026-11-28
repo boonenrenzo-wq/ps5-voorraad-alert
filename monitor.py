@@ -382,13 +382,6 @@ def main() -> int:
                                     "PlayStation Direct heeft een wachtrij geopend; de verkoop start "
                                     "waarschijnlijk. Tik om in de rij te gaan.",
                                     priority=5, tags=["hourglass"], click=p["url"])
-                    if ok and vorig != st:
-                        # Net op voorraad: nog 2 keer nagalmen (om de 5 s), zodat de melding niet
-                        # gemist wordt. Een drop kan maar een minuut duren.
-                        for nr in (2, 3):
-                            time.sleep(5)
-                            notify(f"🚨 ({nr}/3) NU BESTELLEN: {naam}", f"{p['prijs']} · tik om te bestellen.",
-                                   priority=5, tags=["rotating_light"], click=p["url"])
                     laatste_alarm[naam] = nu
                     if not ok:
                         # Reservekanaal: run laten mislukken -> GitHub mailt meteen; de herstartstap
