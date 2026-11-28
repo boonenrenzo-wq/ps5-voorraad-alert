@@ -306,7 +306,8 @@ def ontdek(bekend: dict, bewaakt: set[str], eerste_keer: bool) -> tuple[list[dic
     return nieuwe_var, nieuwe_shop
 
 
-HERHAAL_ALARM_S = 180        # zolang iets bestelbaar is: melding herhalen om de 3 min
+GOLF_UITVERKOCHT_S = 180     # 3 min niet meer te koop -> 'weer uitverkocht'
+GOLF_EINDE_S = 300           # 5 min niet meer te koop -> golf voorbij; daarna telt opduiken als nieuw
 BLIND_NA_S = 300             # pas waarschuwen als de pagina 5 min onleesbaar blijft (korte storingen negeren)
 BLOK_NA_S = 90               # bij HTTP 403 (blokkade, blijft meestal duren) al na 1,5 min waarschuwen
 BLIND_HERHAAL_S = 30 * 60    # zolang de checker blind is: waarschuwing om de 30 min
@@ -334,6 +335,8 @@ def main() -> int:
 
     st_vorig: dict[str, str] = {}
     laatste_alarm: dict[str, float] = {}
+    golf: dict[str, dict] = {}                # lopende voorraadgolf per model
+    laatst_beschikbaar: dict[str, float] = {}
     onbekend_sinds: dict[str, float] = {}
     laatste_detail: dict[str, str] = {}
     laatste_blind = -1e9  # niet 0: monotonic() begint bij de opstarttijd van de VM
@@ -370,12 +373,17 @@ def main() -> int:
 
             if st in (BESCHIKBAAR, WACHTRIJ):
                 onbekend_sinds.pop(naam, None)
-                if vorig != st or nu - laatste_alarm.get(naam, -1e9) >= HERHAAL_ALARM_S:
+                laatst_beschikbaar[naam] = nu
+                # Eén melding per golf: zolang een model aan/uit flikkert, geen nieuwe melding.
+                # Pas als 'weer uitverkocht' al gemeld is of de golf voorbij is, telt het als nieuw.
+                if naam not in golf or golf[naam]["uitverkocht_gemeld"]:
+                    golf[naam] = {"uitverkocht_gemeld": False}
                     print(f"::error title=PS5 {st}::{naam} -> {p['url']}", flush=True)
                     if st == BESCHIKBAAR:
                         ok = notify(f"🚨 OP VOORRAAD: {naam}",
                                     f"{p['prijs']} op playstation.com. Tik NU om te bestellen "
-                                    "(aanmelden nodig, max. 1 per bestelling).",
+                                    "(aanmelden nodig, max. 1 per bestelling). Lijkt hij weg? Blijf even "
+                                    "vernieuwen: voorraad kan een paar minuten aan en uit springen.",
                                     priority=5, tags=["rotating_light"], click=p["url"])
                     else:
                         ok = notify(f"⏳ Wachtrij open: {naam}",
@@ -390,12 +398,21 @@ def main() -> int:
                         return 1
             elif st == UITVERKOCHT:
                 onbekend_sinds.pop(naam, None)
-                if vorig in (BESCHIKBAAR, WACHTRIJ):
-                    notify(f"Weer uitverkocht: {naam}", "Ik blijf verder kijken.", priority=3, tags=["x"])
             else:  # ONBEKEND
                 onbekend_sinds.setdefault(naam, nu)
 
         st_vorig.update(huidig)
+
+        # Golven afronden: 3 min niet meer gezien -> 'weer uitverkocht'; 5 min -> golf voorbij.
+        nu = time.monotonic()
+        for naam in list(golf):
+            weg = nu - laatst_beschikbaar.get(naam, nu)
+            if not golf[naam]["uitverkocht_gemeld"] and weg >= GOLF_UITVERKOCHT_S:
+                notify(f"Weer uitverkocht: {naam}", "Al 3 minuten niet meer te koop. Ik blijf verder kijken.",
+                       priority=3, tags=["x"])
+                golf[naam]["uitverkocht_gemeld"] = True
+            if weg >= GOLF_EINDE_S:
+                del golf[naam]
 
         # Nieuwe PS5-producten of -bundels zoeken (om de ±5 min).
         if (ronde - 1) % ontdek_elke == 0:
@@ -410,6 +427,8 @@ def main() -> int:
                                f"{v['prijs']} op playstation.com. Tik NU om te bestellen.",
                                priority=5, tags=["rotating_light"], click=v["url"])
                         laatste_alarm[v["naam"]] = time.monotonic()
+                        laatst_beschikbaar[v["naam"]] = time.monotonic()
+                        golf[v["naam"]] = {"uitverkocht_gemeld": False}
                         st_vorig[v["naam"]] = BESCHIKBAAR
                     else:
                         notify(f"🆕 Nieuwe PS5-bundel: {v['naam']}",
