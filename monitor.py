@@ -112,6 +112,15 @@ def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc):%H:%M:%S}Z] {msg}", flush=True)
 
 
+def klok() -> str:
+    """Huidige Belgische tijd als HH:MM:SS (voor in de meldingen)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Europe/Brussels")).strftime("%H:%M:%S")
+    except Exception:
+        return datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+
+
 def fetch_urllib(url: str) -> tuple[int, str, str]:
     """Haalt de pagina op met gewone HTTP. Geeft (status, eind-url, html)."""
     req = urllib.request.Request(url, headers=HEADERS)
@@ -306,8 +315,7 @@ def ontdek(bekend: dict, bewaakt: set[str], eerste_keer: bool) -> tuple[list[dic
     return nieuwe_var, nieuwe_shop
 
 
-GOLF_UITVERKOCHT_S = 180     # 3 min niet meer te koop -> 'weer uitverkocht'
-GOLF_EINDE_S = 300           # 5 min niet meer te koop -> golf voorbij; daarna telt opduiken als nieuw
+GOLF_EINDE_S = 300           # opnieuw opduiken binnen 5 min na 'uitverkocht' = dezelfde golf ('opnieuw')
 BLIND_NA_S = 300             # pas waarschuwen als de pagina 5 min onleesbaar blijft (korte storingen negeren)
 BLOK_NA_S = 90               # bij HTTP 403 (blokkade, blijft meestal duren) al na 1,5 min waarschuwen
 BLIND_HERHAAL_S = 30 * 60    # zolang de checker blind is: waarschuwing om de 30 min
@@ -335,8 +343,8 @@ def main() -> int:
 
     st_vorig: dict[str, str] = {}
     laatste_alarm: dict[str, float] = {}
-    golf: dict[str, dict] = {}                # lopende voorraadgolf per model
-    laatst_beschikbaar: dict[str, float] = {}
+    open_sinds: dict[str, tuple[float, str]] = {}  # model -> (monotonic, klok) sinds op voorraad
+    laatst_weg: dict[str, float] = {}               # model -> moment van laatste 'uitverkocht'
     onbekend_sinds: dict[str, float] = {}
     laatste_detail: dict[str, str] = {}
     laatste_blind = -1e9  # niet 0: monotonic() begint bij de opstarttijd van de VM
@@ -373,24 +381,25 @@ def main() -> int:
 
             if st in (BESCHIKBAAR, WACHTRIJ):
                 onbekend_sinds.pop(naam, None)
-                laatst_beschikbaar[naam] = nu
-                # Eén melding per golf: zolang een model aan/uit flikkert, geen nieuwe melding.
-                # Pas als 'weer uitverkocht' al gemeld is of de golf voorbij is, telt het als nieuw.
-                if naam not in golf or golf[naam]["uitverkocht_gemeld"]:
-                    golf[naam] = {"uitverkocht_gemeld": False}
+                if naam not in open_sinds:
+                    # Nieuw opgedoken. Binnen 5 min na 'uitverkocht' = dezelfde golf -> 'opnieuw'.
+                    open_sinds[naam] = (nu, klok())
+                    opnieuw = nu - laatst_weg.get(naam, -1e9) < GOLF_EINDE_S
                     print(f"::error title=PS5 {st}::{naam} -> {p['url']}", flush=True)
-                    if st == BESCHIKBAAR:
-                        ok = notify(f"🚨 OP VOORRAAD: {naam}",
-                                    f"{p['prijs']} op playstation.com. Tik NU om te bestellen "
-                                    "(aanmelden nodig, max. 1 per bestelling). Lijkt hij weg? Blijf even "
-                                    "vernieuwen: voorraad kan een paar minuten aan en uit springen.",
-                                    priority=5, tags=["rotating_light"], click=p["url"])
-                    else:
-                        ok = notify(f"⏳ Wachtrij open: {naam}",
+                    if st == WACHTRIJ:
+                        ok = notify(f"⏳ Wachtrij open ({open_sinds[naam][1]}): {naam}",
                                     "PlayStation Direct heeft een wachtrij geopend; de verkoop start "
                                     "waarschijnlijk. Tik om in de rij te gaan.",
                                     priority=5, tags=["hourglass"], click=p["url"])
-                    laatste_alarm[naam] = nu
+                    elif opnieuw:
+                        ok = notify(f"🔁 Opnieuw op voorraad ({open_sinds[naam][1]}): {naam}",
+                                    f"{p['prijs']} · dezelfde golf als daarnet. Tik NU om te bestellen.",
+                                    priority=5, tags=["repeat"], click=p["url"])
+                    else:
+                        ok = notify(f"🚨 OP VOORRAAD ({open_sinds[naam][1]}): {naam}",
+                                    f"{p['prijs']} op playstation.com. Tik NU om te bestellen "
+                                    "(aanmelden nodig, max. 1 per bestelling).",
+                                    priority=5, tags=["rotating_light"], click=p["url"])
                     if not ok:
                         # Reservekanaal: run laten mislukken -> GitHub mailt meteen; de herstartstap
                         # in de workflow start daarna direct een nieuwe controle.
@@ -398,21 +407,18 @@ def main() -> int:
                         return 1
             elif st == UITVERKOCHT:
                 onbekend_sinds.pop(naam, None)
+                if naam in open_sinds:
+                    start_mono, start_klok = open_sinds.pop(naam)
+                    laatst_weg[naam] = nu
+                    nu_klok = klok()
+                    notify(f"Weer uitverkocht ({nu_klok}): {naam}",
+                           f"Te koop gezien vanaf {start_klok}, weg om {nu_klok} "
+                           f"(±{max(1, round(nu - start_mono))} s). Ik blijf verder kijken.",
+                           priority=3, tags=["x"])
             else:  # ONBEKEND
                 onbekend_sinds.setdefault(naam, nu)
 
         st_vorig.update(huidig)
-
-        # Golven afronden: 3 min niet meer gezien -> 'weer uitverkocht'; 5 min -> golf voorbij.
-        nu = time.monotonic()
-        for naam in list(golf):
-            weg = nu - laatst_beschikbaar.get(naam, nu)
-            if not golf[naam]["uitverkocht_gemeld"] and weg >= GOLF_UITVERKOCHT_S:
-                notify(f"Weer uitverkocht: {naam}", "Al 3 minuten niet meer te koop. Ik blijf verder kijken.",
-                       priority=3, tags=["x"])
-                golf[naam]["uitverkocht_gemeld"] = True
-            if weg >= GOLF_EINDE_S:
-                del golf[naam]
 
         # Nieuwe PS5-producten of -bundels zoeken (om de ±5 min).
         if (ronde - 1) % ontdek_elke == 0:
@@ -427,8 +433,7 @@ def main() -> int:
                                f"{v['prijs']} op playstation.com. Tik NU om te bestellen.",
                                priority=5, tags=["rotating_light"], click=v["url"])
                         laatste_alarm[v["naam"]] = time.monotonic()
-                        laatst_beschikbaar[v["naam"]] = time.monotonic()
-                        golf[v["naam"]] = {"uitverkocht_gemeld": False}
+                        open_sinds[v["naam"]] = (time.monotonic(), klok())
                         st_vorig[v["naam"]] = BESCHIKBAAR
                     else:
                         notify(f"🆕 Nieuwe PS5-bundel: {v['naam']}",
